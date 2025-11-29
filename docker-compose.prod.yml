@@ -23,43 +23,23 @@ services:
 
   nestjs:
     image: md-test-prod:latest
-    container_name: nestjs_prod
+    container_name: nestjs_app_prod
     restart: unless-stopped
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       PORT: 3000
     ports:
-      - "3000:3000"  # открываем порт 3000 для внешнего доступа
+      - "3000:3000"
     depends_on:
       postgres:
-        condition: service_healthy  # ждем, когда postgres будет доступен
-    networks:
-      - app_network_prod
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 40s
-    command: npm run start  # запуск в продакшн-режиме
-
-  nginx:
-    image: nginx:alpine
-    container_name: nginx_prod
-    restart: unless-stopped
-    ports:
-      - "80:80"  # публичный порт 80 для nginx
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro  # монтируем конфиг
-    depends_on:
-      - nestjs
+        condition: service_healthy
     networks:
       - app_network_prod
 
 volumes:
-  postgres_prod_data:  # том для данных postgres
+  postgres_prod_data:
 
 networks:
-  app_network_prod:  # сеть для всех контейнеров
+  app_network_prod:
     driver: bridge
