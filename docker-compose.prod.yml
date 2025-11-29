@@ -31,11 +31,9 @@ services:
       PORT: 3000
     ports:
       - "3000:3000"  # открываем порт 3000 для внешнего доступа
-    expose:
-      - "3000"  # также expose для внутренней сети
     depends_on:
       postgres:
-        condition: service_healthy
+        condition: service_healthy  # ждем, когда postgres будет доступен
     networks:
       - app_network_prod
     healthcheck:
@@ -44,13 +42,14 @@ services:
       timeout: 5s
       retries: 3
       start_period: 40s
+    command: npm run start  # запуск в продакшн-режиме
 
   nginx:
     image: nginx:alpine
     container_name: nginx_prod
     restart: unless-stopped
     ports:
-      - "80:80"  # порты для nginx (публичный 80 на сервере)
+      - "80:80"  # публичный порт 80 для nginx
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro  # монтируем конфиг
     depends_on:
@@ -59,8 +58,8 @@ services:
       - app_network_prod
 
 volumes:
-  postgres_prod_data:
+  postgres_prod_data:  # том для данных postgres
 
 networks:
-  app_network_prod:
+  app_network_prod:  # сеть для всех контейнеров
     driver: bridge
