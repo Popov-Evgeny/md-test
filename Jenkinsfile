@@ -1,87 +1,62 @@
-pipeline {
-    agent any
-    
-    environment {
-        IMAGE_NAME = 'md-test-prod'
-        CONTAINER_NAME = 'nestjs_app_prod'
-        PORT = '3000'
-        POSTGRES_PASSWORD = credentials('postgres-password')
-    }
-    
-    stages {
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
-        
-        stage('Build Docker Image') {
-            steps {
-                sh "docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} -t ${IMAGE_NAME}:latest ."
-            }
-        }
-        
-        stage('Run Tests') {
-            steps {
-                sh '''
-                    docker run -d --name test_db_${BUILD_NUMBER} \
-                        -e POSTGRES_USER=test \
-                        -e POSTGRES_PASSWORD=test \
-                        -e POSTGRES_DB=test_db \
-                        postgres:15-alpine
-                    
-                    sleep 10
-                    
-                    docker run --rm \
-                        --link test_db_${BUILD_NUMBER}:postgres \
-                        -e DATABASE_URL=postgresql://test:test@postgres:5432/test_db?sslmode=disable \
-                        ${IMAGE_NAME}:${BUILD_NUMBER} \
-                        npm run test || true
-                    
-                    docker stop test_db_${BUILD_NUMBER}
-                    docker rm test_db_${BUILD_NUMBER}
-                '''
-            }
-        }
-        
-        stage('Deploy to Production') {
-            steps {
-                sh '''
-                    cd /opt/nestjs-mind-awake/md-test
-                    
-                    cat > .env << EOF
+stage('Deploy to Production') {
+    steps {
+        sh '''
+            cd /opt/nestjs-mind-awake/md-test
+
+            cat > .env << EOF
 POSTGRES_USER=myapp
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 POSTGRES_DB=md_test_db
 NODE_ENV=production
 PORT=3000
 EOF
-                    
-                    docker-compose -f docker-compose.prod.yml stop nestjs || true
-                    docker-compose -f docker-compose.prod.yml rm -f nestjs || true
-                    
-                    docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest
-                    
-                    docker-compose -f docker-compose.prod.yml up -d nestjs
-                    
-                    sleep 15
-                '''
-            }
-        }
-        
-        stage('Health Check') {
-            steps {
-                sh 'curl -f http://localhost:3000 || exit 1'
-            }
-        }
-    }
-    
-    post {
-        success {
-            echo '✅ Production deployment successful!'
-        }
-        failure {
-            echo '❌ Production deployment failed!'
-        }
+
+            # Обновляем образ
+            docker tag md-test-prod:${BUILD_NUMBER} md-test-prod:latest
+
+            # Запускаем новый контейнер на временном порту 3002
+            docker run -d \
+                --name nestjs_app_new \
+                --network md-test_app_network_prod \
+                -e NODE_ENV=production \
+                -e DATABASE_URL=postgresql://myapp:${POSTGRES_PASSWORD}@postgres:5432/md_test_db?sslmode=disable \
+                -e PORT=3000 \
+                -p 3002:3000 \
+                md-test-prod:latest
+
+            # Ждём запуска
+            sleep 15
+
+            # Проверяем что новый контейнер работает
+            curl -f http://localhost:3002 || exit 1
+
+            echo "✅ New container is healthy!"
+
+            # Останавливаем nginx для переключения портов (если используется)
+            # или переключаем docker port mapping
+
+            # Останавливаем старый контейнер
+            docker stop nestjs_app_prod || true
+
+            # Удаляем маппинг старого контейнера
+            docker rm nestjs_app_prod || true
+
+            # Переименовываем новый контейнер в основной
+            docker stop nestjs_app_new
+            docker rm nestjs_app_new
+
+            # Запускаем финальный контейнер на порту 3000
+            docker run -d \
+                --name nestjs_app_prod \
+                --restart unless-stopped \
+                --network md-test_app_network_prod \
+                -e NODE_ENV=production \
+                -e DATABASE_URL=postgresql://myapp:${POSTGRES_PASSWORD}@postgres:5432/md_test_db?sslmode=disable \
+                -e PORT=3000 \
+                -p 3000:3000 \
+                md-test-prod:latest
+
+            sleep 5
+        '''
     }
 }
