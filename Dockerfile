@@ -1,25 +1,54 @@
-FROM node:18-alpine AS builder
+FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
 
 WORKDIR /app
 
 COPY package*.json ./
 
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 COPY . .
 
 RUN npm run build
 
-FROM node:18-alpine
+RUN npm prune --production
+
+# ============================================
+# Production (Production stage)
+# ============================================
+FROM --platform=linux/amd64 node:20-alpine AS production
+
+RUN apk add --no-cache dumb-init
+
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nestjs -u 1001
+
+WORKDIR /app
+
+COPY --from=builder --chown=nestjs:nodejs /app/dist ./dist
+COPY --from=builder --chown=nestjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nestjs:nodejs /app/package*.json ./
+
+USER nestjs
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/health', r => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+
+CMD ["dumb-init", "node", "dist/main"]
+
+# ============================================
+# 2. Dockerfile for Development
+# ============================================
+FROM --platform=$BUILDPLATFORM node:20-alpine AS dev
 
 WORKDIR /app
 
 COPY package*.json ./
+RUN npm install
 
-RUN npm ci --only=production
-
-COPY --from=builder /app/dist ./dist
+COPY . .
 
 EXPOSE 3000
 
-CMD ["node", "dist/main"]
+CMD ["npm", "run", "start:dev"]
