@@ -48,24 +48,25 @@ pipeline {
                 sh '''
                     cd ${PROJECT_DIR}
 
-                    # Обновляем .env.prod
-                    cat > .env.prod << EOF
-POSTGRES_USER=myapp
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-POSTGRES_DB=myapp
-NODE_ENV=production
-PORT=3000
-DATABASE_URL=postgresql://myapp:${POSTGRES_PASSWORD}@postgres:5432/myapp?sslmode=disable
-EOF
+                    # Проверяем что .env.prod существует
+                    if [ ! -f .env.prod ]; then
+                        echo "❌ .env.prod not found!"
+                        exit 1
+                    fi
 
                     # Обновляем образ
                     docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest
 
-                    # Деплоим
-                    echo "🚀 Deploying to production..."
-                    docker-compose -f docker-compose.prod.yml up -d
+                    # Останавливаем старые контейнеры
+                    echo "🛑 Stopping old containers..."
+                    docker-compose -f docker-compose.prod.yml --env-file .env.prod down
 
-                    sleep 15
+                    # Запускаем новые
+                    echo "🚀 Deploying to production..."
+                    docker-compose -f docker-compose.prod.yml --env-file .env.prod up -d
+
+                    echo "⏳ Waiting for application to start..."
+                    sleep 20
                 '''
             }
         }
@@ -73,10 +74,17 @@ EOF
         stage('Health Check') {
             steps {
                 sh '''
+                    echo "🏥 Final health check..."
+
+                    # Ждём пока приложение полностью запустится
+                    sleep 10
+
                     if curl -f http://localhost:3000 > /dev/null 2>&1; then
                         echo "✅ Production is healthy"
                     else
-                        echo "❌ Health check failed"
+                        echo "❌ Production health check failed"
+                        echo "Showing logs:"
+                        docker-compose -f ${PROJECT_DIR}/docker-compose.prod.yml --env-file ${PROJECT_DIR}/.env.prod logs --tail=50 nestjs
                         exit 1
                     fi
                 '''

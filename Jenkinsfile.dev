@@ -48,24 +48,25 @@ pipeline {
                 sh '''
                     cd ${PROJECT_DIR}
 
-                    # Обновляем .env.dev
-                    cat > .env.dev << EOF
-POSTGRES_USER=myapp_dev
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-POSTGRES_DB=myapp_dev
-NODE_ENV=development
-PORT=3001
-DATABASE_URL=postgresql://myapp_dev:${POSTGRES_PASSWORD}@postgres:5432/myapp_dev?sslmode=disable
-EOF
+                    # Проверяем что .env.dev существует
+                    if [ ! -f .env.dev ]; then
+                        echo "❌ .env.dev not found!"
+                        exit 1
+                    fi
 
                     # Обновляем образ
                     docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest
 
-                    # Деплоим
-                    echo "🚀 Deploying to development..."
-                    docker-compose -f docker-compose.dev.yml up -d
+                    # Останавливаем старые контейнеры
+                    echo "🛑 Stopping old containers..."
+                    docker-compose -f docker-compose.dev.yml --env-file .env.dev down
 
-                    sleep 15
+                    # Запускаем новые
+                    echo "🚀 Deploying to development..."
+                    docker-compose -f docker-compose.dev.yml --env-file .env.dev up -d
+
+                    echo "⏳ Waiting for application to start..."
+                    sleep 20
                 '''
             }
         }
@@ -73,10 +74,16 @@ EOF
         stage('Health Check') {
             steps {
                 sh '''
+                    echo "🏥 Final health check..."
+
+                    sleep 10
+
                     if curl -f http://localhost:3001 > /dev/null 2>&1; then
                         echo "✅ Development is healthy"
                     else
-                        echo "❌ Health check failed"
+                        echo "❌ Development health check failed"
+                        echo "Showing logs:"
+                        docker-compose -f ${PROJECT_DIR}/docker-compose.dev.yml --env-file ${PROJECT_DIR}/.env.dev logs --tail=50 nestjs
                         exit 1
                     fi
                 '''
