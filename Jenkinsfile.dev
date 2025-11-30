@@ -2,8 +2,8 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = 'md-test-prod'
-        POSTGRES_PASSWORD = credentials('postgres-password')
+        IMAGE_NAME = 'md-test-dev'
+        POSTGRES_PASSWORD = credentials('postgres-password-dev')
         PROJECT_DIR = '/opt/nestjs-mind-awake/md-test'
     }
 
@@ -23,7 +23,7 @@ pipeline {
         stage('Run Tests') {
             steps {
                 sh '''
-                    docker run -d --name test_db_prod_${BUILD_NUMBER} \
+                    docker run -d --name test_db_dev_${BUILD_NUMBER} \
                         -e POSTGRES_USER=test \
                         -e POSTGRES_PASSWORD=test \
                         -e POSTGRES_DB=test_db \
@@ -32,38 +32,38 @@ pipeline {
                     sleep 10
 
                     docker run --rm \
-                        --link test_db_prod_${BUILD_NUMBER}:postgres \
+                        --link test_db_dev_${BUILD_NUMBER}:postgres \
                         -e DATABASE_URL=postgresql://test:test@postgres:5432/test_db?sslmode=disable \
                         ${IMAGE_NAME}:${BUILD_NUMBER} \
                         npm run test || true
 
-                    docker stop test_db_prod_${BUILD_NUMBER}
-                    docker rm test_db_prod_${BUILD_NUMBER}
+                    docker stop test_db_dev_${BUILD_NUMBER}
+                    docker rm test_db_dev_${BUILD_NUMBER}
                 '''
             }
         }
 
-        stage('Deploy to Production') {
+        stage('Deploy to Development') {
             steps {
                 sh '''
                     cd ${PROJECT_DIR}
 
-                    # Обновляем .env.prod
-                    cat > .env.prod << EOF
-POSTGRES_USER=myapp
+                    # Обновляем .env.dev
+                    cat > .env.dev << EOF
+POSTGRES_USER=myapp_dev
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-POSTGRES_DB=myapp
-NODE_ENV=production
-PORT=3000
-DATABASE_URL=postgresql://myapp:${POSTGRES_PASSWORD}@postgres:5432/myapp?sslmode=disable
+POSTGRES_DB=myapp_dev
+NODE_ENV=development
+PORT=3001
+DATABASE_URL=postgresql://myapp_dev:${POSTGRES_PASSWORD}@postgres:5432/myapp_dev?sslmode=disable
 EOF
 
                     # Обновляем образ
                     docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest
 
                     # Деплоим
-                    echo "🚀 Deploying to production..."
-                    docker-compose -f docker-compose.prod.yml up -d
+                    echo "🚀 Deploying to development..."
+                    docker-compose -f docker-compose.dev.yml up -d
 
                     sleep 15
                 '''
@@ -73,8 +73,8 @@ EOF
         stage('Health Check') {
             steps {
                 sh '''
-                    if curl -f http://localhost:3000 > /dev/null 2>&1; then
-                        echo "✅ Production is healthy"
+                    if curl -f http://localhost:3001 > /dev/null 2>&1; then
+                        echo "✅ Development is healthy"
                     else
                         echo "❌ Health check failed"
                         exit 1
@@ -86,14 +86,14 @@ EOF
 
     post {
         success {
-            echo '✅ Production deployment successful!'
+            echo '✅ Development deployment successful!'
         }
         failure {
             echo '❌ Deployment failed!'
-            sh "docker-compose -f ${PROJECT_DIR}/docker-compose.prod.yml logs --tail=50"
+            sh "docker-compose -f ${PROJECT_DIR}/docker-compose.dev.yml logs --tail=50"
         }
         always {
-            sh 'docker rm -f test_db_prod_${BUILD_NUMBER} || true'
+            sh 'docker rm -f test_db_dev_${BUILD_NUMBER} || true'
         }
     }
 }
