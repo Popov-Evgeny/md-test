@@ -16,7 +16,7 @@ describe('AppController', () => {
 
   describe('root', () => {
     it('should return "Hello World!"', () => {
-      expect(appController.getHello()).toBe('Hello12 from MIND-AWAKE +++++++ PostgreSQL!!!!!!!!!');
+      expect(appController.getHello()).toBe('Я полный лох!!!!!!!!!');
     });
   });
 });
