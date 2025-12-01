@@ -55,19 +55,18 @@ pipeline {
 
                     docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest
 
-                    echo "🛑 Cleaning old containers..."
-                    docker ps -a -q --filter "name=^/md_prod_" | xargs -r docker rm -f
+                    echo "🛑 Stopping and removing old containers..."
+                    docker-compose -f docker-compose.prod.yml --env-file .env.prod down --remove-orphans
 
                     echo "🚀 Starting production containers..."
-                    docker-compose -p md_prod \
-                        -f ${PROJECT_DIR}/docker-compose.prod.yml \
-                        --env-file ${PROJECT_DIR}/.env.prod \
-                        up -d
+                    docker-compose -f docker-compose.prod.yml --env-file .env.prod up -d
 
+                    echo "⏳ Waiting for application to start..."
                     sleep 20
                 '''
             }
         }
+
 
         stage('Health Check') {
             steps {
