@@ -1,4 +1,6 @@
+name: mind-awake-dev
 version: '3.8'
+
 
 services:
   postgres:
