@@ -46,24 +46,31 @@ pipeline {
         stage('Deploy to Production') {
             steps {
                 sh '''
+                    echo "📁 Switching to project directory"
                     cd ${PROJECT_DIR}
 
-                    # Проверяем что .env.prod существует
+                    echo "🔎 Checking .env.prod"
                     if [ ! -f .env.prod ]; then
                         echo "❌ .env.prod not found!"
                         exit 1
                     fi
 
-                    # Обновляем образ
+                    echo "🔄 Updating Docker image tag"
                     docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest
 
-                    # Останавливаем старые контейнеры
-                    echo "🛑 Stopping old containers..."
-                    docker-compose -f docker-compose.prod.yml --env-file .env.prod down
+                    echo "🛑 Stopping old production containers..."
+                    docker-compose \
+                        -p md_prod \
+                        -f ${PROJECT_DIR}/docker-compose.prod.yml \
+                        --env-file ${PROJECT_DIR}/.env.prod \
+                        down
 
-                    # Запускаем новые
-                    echo "🚀 Deploying to production..."
-                    docker-compose -f docker-compose.prod.yml --env-file .env.prod up -d
+                    echo "🚀 Starting new production containers..."
+                    docker-compose \
+                        -p md_prod \
+                        -f ${PROJECT_DIR}/docker-compose.prod.yml \
+                        --env-file ${PROJECT_DIR}/.env.prod \
+                        up -d
 
                     echo "⏳ Waiting for application to start..."
                     sleep 20
@@ -74,17 +81,21 @@ pipeline {
         stage('Health Check') {
             steps {
                 sh '''
-                    echo "🏥 Final health check..."
+                    echo "🏥 Final production health check..."
 
-                    # Ждём пока приложение полностью запустится
                     sleep 10
 
                     if curl -f http://localhost:3000 > /dev/null 2>&1; then
                         echo "✅ Production is healthy"
                     else
                         echo "❌ Production health check failed"
-                        echo "Showing logs:"
-                        docker-compose -f ${PROJECT_DIR}/docker-compose.prod.yml --env-file ${PROJECT_DIR}/.env.prod logs --tail=50 nestjs
+
+                        docker-compose \
+                            -p md_prod \
+                            -f ${PROJECT_DIR}/docker-compose.prod.yml \
+                            --env-file ${PROJECT_DIR}/.env.prod \
+                            logs --tail=50 nestjs
+
                         exit 1
                     fi
                 '''
@@ -97,8 +108,14 @@ pipeline {
             echo '✅ Production deployment successful!'
         }
         failure {
-            echo '❌ Deployment failed!'
-            sh "docker-compose -f ${PROJECT_DIR}/docker-compose.prod.yml logs --tail=50"
+            echo '❌ Production deployment failed!'
+            sh '''
+                docker-compose \
+                    -p md_prod \
+                    -f ${PROJECT_DIR}/docker-compose.prod.yml \
+                    --env-file ${PROJECT_DIR}/.env.prod \
+                    logs --tail=50
+            '''
         }
         always {
             sh 'docker rm -f test_db_prod_${BUILD_NUMBER} || true'
