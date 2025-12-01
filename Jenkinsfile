@@ -46,33 +46,24 @@ pipeline {
         stage('Deploy to Production') {
             steps {
                 sh '''
-                    echo "📁 Switching to project directory"
                     cd ${PROJECT_DIR}
 
-                    echo "🔎 Checking .env.prod"
                     if [ ! -f .env.prod ]; then
-                        echo "❌ .env.prod not found!"
+                        echo ".env.prod not found!"
                         exit 1
                     fi
 
-                    echo "🔄 Updating Docker image tag"
                     docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest
 
-                    echo "🛑 Stopping old production containers..."
-                    docker-compose \
-                        -p md_prod \
-                        -f ${PROJECT_DIR}/docker-compose.prod.yml \
-                        --env-file ${PROJECT_DIR}/.env.prod \
-                        down
+                    echo "🛑 Cleaning old containers..."
+                    docker ps -a -q --filter "name=^/md_prod_" | xargs -r docker rm -f
 
-                    echo "🚀 Starting new production containers..."
-                    docker-compose \
-                        -p md_prod \
+                    echo "🚀 Starting production containers..."
+                    docker-compose -p md_prod \
                         -f ${PROJECT_DIR}/docker-compose.prod.yml \
                         --env-file ${PROJECT_DIR}/.env.prod \
                         up -d
 
-                    echo "⏳ Waiting for application to start..."
                     sleep 20
                 '''
             }
