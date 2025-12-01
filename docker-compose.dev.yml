@@ -1,9 +1,11 @@
+name: mind-awake-dev
 version: '3.8'
+
 
 services:
   postgres:
     image: postgres:15-alpine
-    container_name: postgres_dev
+    #container_name: postgres_dev
     restart: unless-stopped
     env_file:
       - .env.dev
@@ -14,7 +16,7 @@ services:
     networks:
       - app_network_dev
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -32,6 +34,12 @@ services:
         condition: service_healthy
     networks:
       - app_network_dev
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget --no-verbose --tries=1 --spider http://localhost:3001 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
 
 volumes:
   postgres_dev_data:

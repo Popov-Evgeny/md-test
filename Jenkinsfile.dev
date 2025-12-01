@@ -5,6 +5,8 @@ pipeline {
         IMAGE_NAME = 'md-test-dev'
         POSTGRES_PASSWORD = credentials('postgres-password-dev')
         PROJECT_DIR = '/opt/nestjs-mind-awake/md-test'
+        DEV_NETWORK = 'md_test_dev_network'
+        DEV_COMPOSE_PROJECT = 'dev'  // уникальный префикс для docker-compose
     }
 
     stages {
@@ -16,77 +18,92 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                sh "docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} -t ${IMAGE_NAME}:latest ."
+                sh """
+                    echo "🔧 Building Docker image..."
+                    docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} -t ${IMAGE_NAME}:latest .
+                """
+            }
+        }
+
+        stage('Create Dev Network') {
+            steps {
+                sh """
+                    if ! docker network ls --format '{{.Name}}' | grep -w ${DEV_NETWORK}; then
+                        echo "🌐 Creating dev network..."
+                        docker network create ${DEV_NETWORK}
+                    else
+                        echo "🌐 Dev network already exists"
+                    fi
+                """
             }
         }
 
         stage('Run Tests') {
             steps {
-                sh '''
-                    docker run -d --name test_db_dev_${BUILD_NUMBER} \
-                        -e POSTGRES_USER=test \
-                        -e POSTGRES_PASSWORD=test \
-                        -e POSTGRES_DB=test_db \
+                sh """
+                    echo "🧪 Starting temporary test database..."
+                    docker run -d --name test_db_dev_${BUILD_NUMBER} \\
+                        -e POSTGRES_USER=test \\
+                        -e POSTGRES_PASSWORD=${POSTGRES_PASSWORD} \\
+                        -e POSTGRES_DB=test_db \\
+                        --network ${DEV_NETWORK} \\
                         postgres:15-alpine
 
                     sleep 10
 
-                    docker run --rm \
-                        --link test_db_dev_${BUILD_NUMBER}:postgres \
-                        -e DATABASE_URL=postgresql://test:test@postgres:5432/test_db?sslmode=disable \
-                        ${IMAGE_NAME}:${BUILD_NUMBER} \
-                        npm run test || true
+                    echo "🏃 Running tests..."
+                    docker run --rm \\
+                        --network ${DEV_NETWORK} \\
+                        -e DATABASE_URL=postgresql://test:${POSTGRES_PASSWORD}@test_db_dev_${BUILD_NUMBER}:5432/test_db?sslmode=disable \\
+                        ${IMAGE_NAME}:${BUILD_NUMBER} \\
+                        npm run test
 
+                    echo "🧹 Cleaning up test database..."
                     docker stop test_db_dev_${BUILD_NUMBER}
                     docker rm test_db_dev_${BUILD_NUMBER}
-                '''
+                """
             }
         }
 
         stage('Deploy to Development') {
             steps {
-                sh '''
+                sh """
                     cd ${PROJECT_DIR}
 
-                    # Проверяем что .env.dev существует
                     if [ ! -f .env.dev ]; then
                         echo "❌ .env.dev not found!"
                         exit 1
                     fi
 
-                    # Обновляем образ
+                    echo "🔄 Tagging latest image..."
                     docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest
 
-                    # Останавливаем старые контейнеры
-                    echo "🛑 Stopping old containers..."
-                    docker-compose -f docker-compose.dev.yml --env-file .env.dev down
+                    echo "🛑 Stopping old development containers..."
+                    docker-compose -p ${DEV_COMPOSE_PROJECT} -f docker-compose.dev.yml --env-file .env.dev down
 
-                    # Запускаем новые
-                    echo "🚀 Deploying to development..."
-                    docker-compose -f docker-compose.dev.yml --env-file .env.dev up -d
+                    echo "🚀 Deploying new development containers..."
+                    docker-compose -p ${DEV_COMPOSE_PROJECT} -f docker-compose.dev.yml --env-file .env.dev up -d
 
-                    echo "⏳ Waiting for application to start..."
+                    echo "⏳ Waiting for services to start..."
                     sleep 20
-                '''
+                """
             }
         }
 
         stage('Health Check') {
             steps {
-                sh '''
-                    echo "🏥 Final health check..."
-
+                sh """
+                    echo "🏥 Performing health check..."
                     sleep 10
 
                     if curl -f http://localhost:3001 > /dev/null 2>&1; then
-                        echo "✅ Development is healthy"
+                        echo "✅ Development environment is healthy"
                     else
-                        echo "❌ Development health check failed"
-                        echo "Showing logs:"
-                        docker-compose -f ${PROJECT_DIR}/docker-compose.dev.yml --env-file ${PROJECT_DIR}/.env.dev logs --tail=50 nestjs
+                        echo "❌ Health check failed! Showing logs:"
+                        docker-compose -p ${DEV_COMPOSE_PROJECT} -f ${PROJECT_DIR}/docker-compose.dev.yml --env-file ${PROJECT_DIR}/.env.dev logs --tail=50 nestjs
                         exit 1
                     fi
-                '''
+                """
             }
         }
     }
@@ -97,10 +114,16 @@ pipeline {
         }
         failure {
             echo '❌ Deployment failed!'
-            sh "docker-compose -f ${PROJECT_DIR}/docker-compose.dev.yml logs --tail=50"
+            sh "docker-compose -p ${DEV_COMPOSE_PROJECT} -f ${PROJECT_DIR}/docker-compose.dev.yml logs --tail=50"
         }
         always {
-            sh 'docker rm -f test_db_dev_${BUILD_NUMBER} || true'
+            sh """
+                echo "🧹 Cleanup leftover test containers..."
+                docker rm -f test_db_dev_${BUILD_NUMBER} || true
+
+                echo "🧹 Cleanup dangling dev images..."
+                docker image prune -f --filter label=dev
+            """
         }
     }
 }
