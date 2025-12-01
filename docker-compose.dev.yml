@@ -5,7 +5,7 @@ version: '3.8'
 services:
   postgres:
     image: postgres:15-alpine
-    container_name: postgres_dev
+    #container_name: postgres_dev
     restart: unless-stopped
     env_file:
       - .env.dev
