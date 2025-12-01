@@ -15,6 +15,19 @@ pipeline {
             }
         }
 
+        stage('Prepare Network') {
+            steps {
+                sh """
+                    if ! docker network inspect ${DEV_NETWORK} > /dev/null 2>&1; then
+                        echo "🌐 Creating Docker network ${DEV_NETWORK}"
+                        docker network create ${DEV_NETWORK}
+                    else
+                        echo "🌐 Docker network ${DEV_NETWORK} already exists"
+                    fi
+                """
+            }
+        }
+
         stage('Build Docker Image') {
             steps {
                 sh """
@@ -26,28 +39,30 @@ pipeline {
 
         stage('Run Tests') {
             steps {
-                sh """
-                    echo "🧪 Starting temporary test database..."
-                    docker run -d --name test_db_dev_${BUILD_NUMBER} \\
-                        -e POSTGRES_USER=test \\
-                        -e POSTGRES_PASSWORD=${POSTGRES_PASSWORD} \\
-                        -e POSTGRES_DB=test_db \\
-                        --network ${DEV_NETWORK} \\
-                        postgres:15-alpine
+                withEnv(["DATABASE_PASSWORD=${POSTGRES_PASSWORD}"]) {
+                    sh """
+                        echo "🧪 Starting temporary test database..."
+                        docker run -d --name test_db_dev_${BUILD_NUMBER} \\
+                            -e POSTGRES_USER=test \\
+                            -e POSTGRES_PASSWORD=$DATABASE_PASSWORD \\
+                            -e POSTGRES_DB=test_db \\
+                            --network ${DEV_NETWORK} \\
+                            postgres:15-alpine
 
-                    sleep 10
+                        sleep 10
 
-                    echo "🏃 Running tests..."
-                    docker run --rm \\
-                        --network ${DEV_NETWORK} \\
-                        -e DATABASE_URL=postgresql://test:${POSTGRES_PASSWORD}@test_db_dev_${BUILD_NUMBER}:5432/test_db?sslmode=disable \\
-                        ${IMAGE_NAME}:${BUILD_NUMBER} \\
-                        npm run test
+                        echo "🏃 Running tests..."
+                        docker run --rm \\
+                            --network ${DEV_NETWORK} \\
+                            -e DATABASE_URL=postgresql://test:$DATABASE_PASSWORD@test_db_dev_${BUILD_NUMBER}:5432/test_db?sslmode=disable \\
+                            ${IMAGE_NAME}:${BUILD_NUMBER} \\
+                            npm run test
 
-                    echo "🧹 Cleaning up test database..."
-                    docker stop test_db_dev_${BUILD_NUMBER}
-                    docker rm test_db_dev_${BUILD_NUMBER}
-                """
+                        echo "🧹 Cleaning up test database..."
+                        docker stop test_db_dev_${BUILD_NUMBER}
+                        docker rm test_db_dev_${BUILD_NUMBER}
+                    """
+                }
             }
         }
 
